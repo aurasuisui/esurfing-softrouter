@@ -1,0 +1,35 @@
+# /etc/esurfing/lite.conf — esurfing_lite.py 配置示例
+# 安装: sudo cp lite/esurfing_lite.py /usr/local/bin/esurfing-lite
+#       sudo cp lite/esurfing-lite.service /etc/systemd/system/
+#       sudo cp lite.conf.example /etc/esurfing/lite.conf  # 并填入账号
+
+# 必填
+user=你的校园网账号
+pass=你的密码
+
+# 检测页（未认证时访问它会跳转到 portal；可从官方 conf/conf.xml 的 redirect 拿到）
+detect_url=http://14.146.227.141:7001/detect.html
+
+# ---- 可选（留空则自动从 portal 页面解析 / 自动探测）----
+# 如果自动获取失败，抓包后手动填：
+#ticket_url=http://x.x.x.x/ticket.cgi
+#auth_url=http://x.x.x.x/auth.cgi
+#keep_url=http://x.x.x.x/keep.cgi
+#term_url=http://x.x.x.x/term.cgi
+#client_ip=10.x.x.x
+
+# 学校标识（官方客户端 HTTP 头里的 CDC-SchoolId / CDC-Domain / CDC-Area，一般可留空）
+#cdc_schoolid=
+#cdc_domain=
+#cdc_area=
+
+# 算法文件位置（官方客户端下载的 zxmAlogic.zxm）
+#zxm_path=/usr/local/ESurfing/bin/zxmAlogic.zxm
+
+# 客户端指纹
+#ua=CCTP/Linux64/1003
+#ostag=linux64
+
+# 保活/重试
+#interval=60
+#retry_delay=10

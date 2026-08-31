@@ -1,0 +1,17 @@
+[Unit]
+Description=ESurfing campus network dialer (lite, clean-room reimplementation)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/esurfing-lite --config /etc/esurfing/lite.conf
+Restart=always
+RestartSec=10
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

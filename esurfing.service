@@ -1,0 +1,21 @@
+[Unit]
+Description=ESurfing campus network dialer (patched, headless)
+# 等网络接口起来后再拨号
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# 账号密码文件: /etc/esurfing/account  (ES_USER=..., ES_PASS=...)
+EnvironmentFile=-/etc/esurfing/account
+ExecStart=/usr/local/ESurfing/bin/ESurfingSvr ${ES_USER} ${ES_PASS}
+Restart=always
+RestartSec=10
+# 守护进程需要 root：写 /proc、设置 DNS、在自身目录写日志/算法文件
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

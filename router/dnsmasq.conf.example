@@ -1,0 +1,22 @@
+# router/dnsmasq.conf — 仅当你把下游路由器设为 AP/桥接模式时才需要
+# （路由器自己开 DHCP 时不要用这份配置）
+#
+# 装包: sudo apt install dnsmasq
+# 启用: 把本文件复制为 /etc/dnsmasq.d/esurfing.conf 后 systemctl restart dnsmasq
+#
+# LAN 口静态地址需先配好，例如:
+#   sudo ip addr add 192.168.9.1/24 dev <LAN口>   (或用 setup-nat.sh --lan-ip)
+
+interface=<LAN口>
+bind-interfaces
+domain-needed
+bogus-priv
+
+# DHCP 地址池
+dhcp-range=192.168.9.100,192.168.9.200,255.255.255.0,12h
+dhcp-option=option:router,192.168.9.1
+dhcp-option=option:dns-server,192.168.9.1
+
+# 上行 DNS（拨号成功后可用校园网 DNS，失败则走公共 DNS）
+server=223.5.5.5
+server=119.29.29.29
