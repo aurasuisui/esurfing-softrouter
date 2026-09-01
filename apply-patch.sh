@@ -21,10 +21,15 @@
 #   作用: 消息线程空闲时每秒只醒一次，CPU 占用归零。
 #
 # 补丁4 (文件偏移 0x24BDF, vaddr 0x424BDF):
-#   CPortalServer::Start() 里初始网络状态属于 {1,2,3,11,12,13} 时只发一条
-#   GUI 状态消息就返回(无 GUI = 死路，拨号链永远不启动)
+#   CPortalServer::Start() 已初始化分支里，初始网络状态属于 {1,2,3,11,12,13}
+#   时只发一条 GUI 状态消息就返回(无 GUI = 死路，拨号链不启动)
 #   原始: 75 5E  (jne CheckNetStatus)
 #   改为: EB 5E  (jmp CheckNetStatus)  -> 无条件启动拨号任务链
+#
+# 补丁5 (文件偏移 0x249F5, vaddr 0x4249F5):
+#   CPortalServer::Start() 首次初始化分支(创建 PortalConn、启动定时器/工作线程后)
+#   原始: E9 E1 02 00 00  (jmp 函数末尾, 直接返回 -> 拨号链不启动)
+#   改为: E9 45 02 00 00  (jmp CheckNetStatus 调用点) -> 首启也启动拨号任务链
 #
 # 其余认证/保活/算法更新逻辑完全不动。
 #
@@ -52,10 +57,11 @@ P3_OFF=0x36539
 P3_ORIG="488b45f84883c0584889c7e853f5ffff488b45f80fb6808800000084c0"
 P3_PATCH="488d7df84883c758e856f5ffffbf01000000e8f0dcfcffe96cffffff90"
 P4_OFF=0x24BDF; P4_ORIG="755e"; P4_PATCH="eb5e"
+P5_OFF=0x249F5; P5_ORIG="e9e1020000"; P5_PATCH="e945020000"
 
 echo "当前文件: $BIN"
 need_backup=0
-for i in 1 2 3 4; do
+for i in 1 2 3 4 5; do
   eval "off=\$P${i}_OFF orig=\$P${i}_ORIG patch=\$P${i}_PATCH"
   len=$((${#orig}/2))
   cur=$(read_hex "$off" "$len")
@@ -76,7 +82,7 @@ if [ "$need_backup" = "1" ] && [ ! -f "$BIN.orig" ]; then
   echo "已备份原始文件 -> $BIN.orig"
 fi
 
-for i in 1 2 3 4; do
+for i in 1 2 3 4 5; do
   eval "off=\$P${i}_OFF orig=\$P${i}_ORIG patch=\$P${i}_PATCH"
   len=$((${#orig}/2))
   cur=$(read_hex "$off" "$len")
@@ -89,6 +95,6 @@ for i in 1 2 3 4; do
   [ "$after" = "$patch" ] || { echo "补丁$i 写入失败" >&2; exit 1; }
 done
 
-echo "OK: 四个补丁均已生效。"
+echo "OK: 五个补丁均已生效。"
 echo "  sha256: $(sha256sum "$BIN" | cut -d' ' -f1)"
 echo "  恢复原始行为: sudo cp '$BIN.orig' '$BIN'"
