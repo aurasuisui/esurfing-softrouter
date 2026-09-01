@@ -28,7 +28,15 @@ OFF=0x223F8
 ORIG="554889e5"
 PATCH="31c0c390"
 
-cur=$(xxd -p -l 4 -s $((OFF)) "$BIN" | tr -d '\n')
+# 只依赖 python3（Debian 13 必带），不依赖 xxd
+read_hex() {
+  python3 -c "import sys;f=open(sys.argv[1],'rb');f.seek(int(sys.argv[2],16));print(f.read(int(sys.argv[3],16)).hex());f.close()" "$BIN" "$OFF" 4
+}
+write_hex() {
+  python3 -c "import sys;f=open(sys.argv[1],'r+b');f.seek(int(sys.argv[2],16));f.write(bytes.fromhex(sys.argv[3]));f.close()" "$BIN" "$OFF" "$PATCH"
+}
+
+cur=$(read_hex)
 echo "当前文件: $BIN"
 echo "偏移 0x223F8 处 4 字节: $cur"
 
@@ -48,9 +56,9 @@ if [ ! -f "$BIN.orig" ]; then
   echo "已备份原始文件 -> $BIN.orig"
 fi
 
-printf '31c0c390' | xxd -r -p | dd of="$BIN" bs=1 seek=$((OFF)) conv=notrunc status=none
+write_hex
 
-after=$(xxd -p -l 4 -s $((OFF)) "$BIN" | tr -d '\n')
+after=$(read_hex)
 echo "补丁后: $after"
 if [ "$after" = "$PATCH" ]; then
   echo "OK: 共享检测(进程检查 + IP转发检查)已禁用。"
