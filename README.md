@@ -99,10 +99,14 @@ againstList 定期执行：
 并在 logout-delay(默认300秒) 后强制下线，GUI 报
 "检测到共享软件冲突/检测到共享冲突"。
 
-apply-patch.sh 把该函数入口（文件偏移 0x223F8，vaddr 0x4223F8）从
-"push rbp; mov rbp,rsp" 改为 "xor eax,eax; ret"（永远返回 0 = 环境正常），
-其余逻辑一字未动。补丁幂等、会先备份 ESurfingSvr.orig 并校验原始字节，
-可随时恢复：
+apply-patch.sh 一共打三个补丁（其余逻辑一字未动）：
+
+1. IsValidEnvironment 入口（偏移 0x223F8）改为 "xor eax,eax; ret"，恒返回"环境正常"；
+2. checkWifi（偏移 0x26B12）改为 "ret"，不再自调度定时任务；
+3. CMsgEngine::GetMessage 的空队列分支（偏移 0x36539）改为 Unlock 后 sleep(1) 再查，
+   修复无 GUI（无界面/服务器）运行时消息线程 100% 占满 CPU 的空转。
+
+补丁幂等、会先备份 ESurfingSvr.orig 并校验原始字节，可随时恢复：
 
     sudo cp /usr/local/ESurfing/bin/ESurfingSvr.orig /usr/local/ESurfing/bin/ESurfingSvr
 
