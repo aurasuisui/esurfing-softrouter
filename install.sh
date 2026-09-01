@@ -38,25 +38,7 @@ echo "== 客户端包目录: $SRC_DIR =="
 DEST=/usr/local/ESurfing
 mkdir -p "$DEST/bin" "$DEST/lib" "$DEST/bin/conf"
 
-# ---------- 1. 安装缺失的依赖库 ----------
-echo "== 安装缺失的依赖库 =="
-if [ -d "$SRC_DIR/lib" ]; then
-  for lib in "$SRC_DIR"/lib/*; do
-    [ -f "$lib" ] || continue
-    name="$(basename "$lib")"
-    # 系统里已有同名库则跳过；没有才拷贝（主要是 OpenSSL 1.0 的 libcrypto.so.10 / libssl.so.10）
-    if ! ldconfig -p 2>/dev/null | grep -q "/${name} "; then
-      cp -a "$lib" "$DEST/lib/"
-      echo "  copied ${name}"
-    fi
-  done
-else
-  echo "  未找到 $SRC_DIR/lib，跳过（Debian 13 一般只需要 libcrypto.so.10/libssl.so.10）"
-fi
-echo "$DEST/lib" > /etc/ld.so.conf.d/esurfing.conf
-ldconfig
-
-# ---------- 2. 复制守护进程与配置 ----------
+# ---------- 1. 复制守护进程与配置 ----------
 echo "== 安装 ESurfingSvr =="
 cp -a "$SRC_DIR/ESurfingSvr" "$DEST/bin/ESurfingSvr"
 chmod 755 "$DEST/bin/ESurfingSvr"
@@ -65,6 +47,47 @@ if [ -d "$SRC_DIR/conf" ]; then
 fi
 # 守护进程从自身目录读取 conf/conf.xml（redirect/detect.html 等）
 echo "  已安装 -> $DEST/bin/ESurfingSvr"
+
+# ---------- 2. 依赖库（只补真正缺失的，绝不覆盖系统基础库） ----------
+echo "== 检查依赖库 =="
+# 重要：官方包自带 2016 年的 glibc 等旧库，绝不能整包复制并加入 ld.so 搜索路径，
+# 否则会"覆盖"系统 libc，导致 cp/sudo 等所有命令都无法执行。
+# 这里只对已安装的 ESurfingSvr 跑 ldd，按缺失名单逐个补，并硬性跳过基础库。
+MISSING="$(ldd "$DEST/bin/ESurfingSvr" 2>/dev/null | grep 'not found' | awk '{print $1}' || true)"
+if [ -n "$MISSING" ] && [ -d "$SRC_DIR/lib" ]; then
+  echo "  缺失库: $MISSING"
+  for name in $MISSING; do
+    case "$name" in
+      libc.so.*|ld-linux*|libpthread*|libdl.so.*|libm.so.*|libselinux*|libz.so.*|libstdc++*|libgcc_s*)
+        echo "  跳过基础库 $name（必须用系统版本）"; continue ;;
+    esac
+    if [ -f "$SRC_DIR/lib/$name" ]; then
+      cp -a "$SRC_DIR/lib/$name" "$DEST/lib/"
+      echo "  copied $name"
+    else
+      echo "  警告: 官方包内也没有 $name，请用 apt 安装"
+    fi
+  done
+else
+  echo "  所有依赖系统都有，无需复制旧库"
+fi
+
+# 安全兜底：万一基础库混了进来，立刻清掉整个 lib 目录
+if ls "$DEST/lib" 2>/dev/null | grep -qE '^(libc\.so|ld-linux|libpthread|libdl\.so|libm\.so|libselinux|libz\.so|libstdc\+\+|libgcc_s)'; then
+  echo "严重: 检测到基础库被复制，已自动清理。"
+  rm -rf "$DEST/lib"
+  mkdir -p "$DEST/lib"
+fi
+
+# 只有真的复制了库时才注册 ld 路径；否则把注册清理掉并重建缓存
+if [ -n "$(ls -A "$DEST/lib" 2>/dev/null)" ]; then
+  echo "$DEST/lib" > /etc/ld.so.conf.d/esurfing.conf
+  ldconfig
+else
+  rm -f /etc/ld.so.conf.d/esurfing.conf
+  ldconfig 2>/dev/null || true
+  echo "  无需注册额外库路径"
+fi
 
 # ---------- 3. 打补丁：禁用共享检测 ----------
 echo "== 打补丁禁用共享检测 =="
