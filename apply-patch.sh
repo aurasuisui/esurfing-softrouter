@@ -20,6 +20,12 @@
 #   改为:   Unlock 后 sleep(1) 再回到 Lock
 #   作用: 消息线程空闲时每秒只醒一次，CPU 占用归零。
 #
+# 补丁4 (文件偏移 0x24BDF, vaddr 0x424BDF):
+#   CPortalServer::Start() 里初始网络状态属于 {1,2,3,11,12,13} 时只发一条
+#   GUI 状态消息就返回(无 GUI = 死路，拨号链永远不启动)
+#   原始: 75 5E  (jne CheckNetStatus)
+#   改为: EB 5E  (jmp CheckNetStatus)  -> 无条件启动拨号任务链
+#
 # 其余认证/保活/算法更新逻辑完全不动。
 #
 # 用法: sudo ./apply-patch.sh [ESurfingSvr路径]
@@ -45,10 +51,11 @@ P2_OFF=0x26B12; P2_ORIG="554889e5"; P2_PATCH="c3909090"
 P3_OFF=0x36539
 P3_ORIG="488b45f84883c0584889c7e853f5ffff488b45f80fb6808800000084c0"
 P3_PATCH="488d7df84883c758e856f5ffffbf01000000e8f0dcfcffe96cffffff90"
+P4_OFF=0x24BDF; P4_ORIG="755e"; P4_PATCH="eb5e"
 
 echo "当前文件: $BIN"
 need_backup=0
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   eval "off=\$P${i}_OFF orig=\$P${i}_ORIG patch=\$P${i}_PATCH"
   len=$((${#orig}/2))
   cur=$(read_hex "$off" "$len")
@@ -69,7 +76,7 @@ if [ "$need_backup" = "1" ] && [ ! -f "$BIN.orig" ]; then
   echo "已备份原始文件 -> $BIN.orig"
 fi
 
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   eval "off=\$P${i}_OFF orig=\$P${i}_ORIG patch=\$P${i}_PATCH"
   len=$((${#orig}/2))
   cur=$(read_hex "$off" "$len")
@@ -82,6 +89,6 @@ for i in 1 2 3; do
   [ "$after" = "$patch" ] || { echo "补丁$i 写入失败" >&2; exit 1; }
 done
 
-echo "OK: 三个补丁均已生效。"
+echo "OK: 四个补丁均已生效。"
 echo "  sha256: $(sha256sum "$BIN" | cut -d' ' -f1)"
 echo "  恢复原始行为: sudo cp '$BIN.orig' '$BIN'"
