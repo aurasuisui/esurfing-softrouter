@@ -40,6 +40,11 @@ mkdir -p "$DEST/bin" "$DEST/lib" "$DEST/bin/conf"
 
 # ---------- 1. 复制守护进程与配置 ----------
 echo "== 安装 ESurfingSvr =="
+# 防止"文本文件忙"：先停服务、结束残留进程、删除旧文件再覆盖
+systemctl stop esurfing.service 2>/dev/null || true
+pkill -f '/usr/local/ESurfing/bin/ESurfingSvr' 2>/dev/null || true
+sleep 1
+rm -f "$DEST/bin/ESurfingSvr"
 cp -a "$SRC_DIR/ESurfingSvr" "$DEST/bin/ESurfingSvr"
 chmod 755 "$DEST/bin/ESurfingSvr"
 if [ -d "$SRC_DIR/conf" ]; then
