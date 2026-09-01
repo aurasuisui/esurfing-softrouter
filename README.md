@@ -41,10 +41,27 @@
 
 ## 快速开始（方案A）
 
-在 Debian 13（multi-user.target，即 init 3）上：
+需要准备两样东西，都放到 Debian 机器上：
 
-    # 1. 上传/拷贝客户端包(linux-client-2.4-64)与 esurfing-softrouter 到同一目录后:
-    sudo ./install.sh 你的账号 你的密码 /路径/linux-client-2.4-64
+1. 官方客户端包 linux-client-2.4-64（学校发的那个文件夹，里面有
+   ESurfingSvr、lib/、conf/。本仓库不含官方二进制，需要你提供这份原版包）；
+2. 本仓库 esurfing-softrouter。
+
+把它们放到同一个父目录（例如 /root/esurfing/），目录结构：
+
+    /root/esurfing/
+    ├── linux-client-2.4-64/     # 官方包
+    └── esurfing-softrouter/     # 本仓库
+
+    # 从 Windows 传官方包到 Debian:
+    #   scp -r linux-client-2.4-64 root@<debian的IP>:/root/esurfing/
+    # 在 Debian 上:
+    #   cd /root/esurfing
+    #   git clone https://github.com/aurasuisui/esurfing-softrouter.git
+    #   cd esurfing-softrouter
+
+    # 1. 安装并启动（第三个参数 = 官方包路径；与脚本同目录时可省略）
+    sudo ./install.sh 你的账号 你的密码 ../linux-client-2.4-64
 
     # 2. 看拨号日志（账号无需 @ 后缀，报错码含义见 conf/code.xml）
     journalctl -u esurfing -f
