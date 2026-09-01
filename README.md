@@ -41,6 +41,13 @@
 
 ## 快速开始（方案A）
 
+> 也可以直接克隆整合仓库（官方包 + 本工具一次拿全）:
+>
+>     git clone --recurse-submodules https://github.com/aurasuisui/esurfing.git
+>     cd esurfing/esurfing-softrouter
+>
+> 此时官方包就在 ../linux-client-2.4-64，可直接跳到第 1 步。
+
 需要准备两样东西，都放到 Debian 机器上：
 
 1. 官方客户端包 linux-client-2.4-64（学校发的那个文件夹，里面有
