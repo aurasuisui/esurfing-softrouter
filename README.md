@@ -57,7 +57,9 @@
     journalctl -u esurfing-lite -f              # 看日志: 认证成功/心跳保活
 
     # 3. 配置软路由（自动探测 WAN=默认路由口, LAN=另一个以太网口）
-    sudo ./router/setup-nat.sh
+    #    推荐带 --lan-ip: 自动配好 LAN 静态地址 + dnsmasq DHCP,
+    #    下游路由器重置后插 WAN 口即可自动拿到地址
+    sudo ./router/setup-nat.sh --lan-ip 192.168.9.1/24
     # 或显式指定：
     sudo ./router/setup-nat.sh --wan eno1 --lan enp1s0 --lan-ip 192.168.9.1/24
 

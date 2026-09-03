@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 *.orig
 /Log/
+lite/_legacy_box_2048.bin
+

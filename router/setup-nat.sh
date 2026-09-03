@@ -9,6 +9,7 @@
 #   sudo ./setup-nat.sh                          # 自动探测 WAN(默认路由)/LAN
 #   sudo ./setup-nat.sh --wan enp1s0 --lan enp2s0
 #   sudo ./setup-nat.sh --wan enp1s0 --lan enp2s0 --lan-ip 192.168.9.1/24
+#       (推荐带 --lan-ip: 自动配置 LAN 静态地址 + dnsmasq DHCP, 下游路由器 WAN 直接自动获取)
 #   sudo ./setup-nat.sh --ttl 64                 # 额外: 出口包 TTL 统一为 64(防 TTL 指纹, 可选)
 set -euo pipefail
 
@@ -95,17 +96,59 @@ else
   echo "未找到 nft，请 apt install nftables 后重新运行本脚本。" >&2
 fi
 
-# ---------- 3. LAN 静态地址（可选） ----------
+# ---------- 3. LAN 静态地址 + DHCP（可选, 带 --lan-ip 时启用） ----------
 if [ -n "$LAN_IP" ]; then
-  echo "配置 $LAN 静态地址 $LAN_IP (写入 /etc/network/interfaces.d/esurfing-lan)"
-  mkdir -p /etc/network/interfaces.d
-  cat > /etc/network/interfaces.d/esurfing-lan <<EOF
+  LAN_ADDR="${LAN_IP%/*}"
+  NET="${LAN_ADDR%.*}"
+
+  echo "配置 $LAN 静态地址 $LAN_IP"
+  if command -v nmcli >/dev/null 2>&1 && systemctl is-active NetworkManager >/dev/null 2>&1; then
+    # NetworkManager 管理(Debian 默认): 先禁掉该网口旧的自动连接, 再建/改 esurfing-lan
+    while IFS=: read -r name _ _ dev; do
+      if [ "$dev" = "$LAN" ] && [ "$name" != "esurfing-lan" ]; then
+        echo "  禁用旧连接 $name"
+        nmcli con down "$name" 2>/dev/null || true
+        nmcli con mod "$name" connection.autoconnect no 2>/dev/null || true
+      fi
+    done < <(nmcli -t con show 2>/dev/null)
+    if ! nmcli -t con show | grep -q '^esurfing-lan:'; then
+      nmcli con add type ethernet con-name esurfing-lan ifname "$LAN" \
+        ipv4.method manual ipv4.addresses "$LAN_IP" ipv6.method ignore
+    else
+      nmcli con mod esurfing-lan ipv4.method manual ipv4.addresses "$LAN_IP" ipv6.method ignore
+    fi
+    nmcli con mod esurfing-lan connection.autoconnect yes
+    nmcli con up esurfing-lan || true
+  else
+    # ifupdown 路径
+    mkdir -p /etc/network/interfaces.d
+    cat > /etc/network/interfaces.d/esurfing-lan <<EOF
 auto $LAN
 iface $LAN inet static
-    address ${LAN_IP%/*}
+    address $LAN_ADDR
     netmask 255.255.255.0
 EOF
-  if command -v ifup >/dev/null; then ifup "$LAN" || true; fi
+    if command -v ifup >/dev/null; then ifup "$LAN" || true; fi
+  fi
+
+  # dnsmasq: 给下游路由器 WAN 口发地址(实测通过: 红米 AC2100 直接拿到 192.168.9.x)
+  if ! command -v dnsmasq >/dev/null 2>&1; then
+    echo "安装 dnsmasq ..."
+    apt-get install -y dnsmasq
+  fi
+  mkdir -p /etc/dnsmasq.d
+  cat > /etc/dnsmasq.d/esurfing.conf <<EOF
+# 校园网软路由: 给下游路由器 WAN 口发地址 (由 setup-nat.sh 生成)
+interface=$LAN
+bind-interfaces
+dhcp-range=$NET.100,$NET.200,12h
+dhcp-option=option:router,$LAN_ADDR
+dhcp-option=option:dns-server,$LAN_ADDR
+dhcp-authoritative
+EOF
+  systemctl enable dnsmasq.service >/dev/null 2>&1 || true
+  systemctl restart dnsmasq.service
+  echo "dnsmasq 已配置: $LAN DHCP $NET.100-$NET.200 网关/DNS=$LAN_ADDR"
 fi
 
 echo
@@ -113,7 +156,9 @@ echo "=============================================================="
 echo "NAT 配置完成。"
 echo "  WAN 口: $WAN (MASQUERADE 出口)"
 echo "  LAN 口: $LAN (接路由器 WAN 口)"
-if [ -n "$LAN_IP" ]; then echo "  LAN 地址: $LAN_IP"; fi
+if [ -n "$LAN_IP" ]; then
+  echo "  LAN 地址: $LAN_IP (已配 DHCP: $NET.100-$NET.200)"
+fi
 echo "  转发开关: /etc/sysctl.d/40-ip-forward.conf"
 echo "  防火墙:   /etc/nftables.conf"
 echo "=============================================================="
@@ -121,5 +166,6 @@ echo
 echo "下游路由器的接法（两种任选）:"
 echo "  A. 路由器开『路由模式』: 路由器 WAN 口接 debian 的 $LAN 口，WAN 设为自动获取(DHCP)。"
 echo "     最简单，所有设备在路由器后面，双重 NAT 对校园网无影响。"
+echo "     (本脚本已配好 DHCP, 路由器重置后插上即可自动拿到地址)"
 echo "  B. 路由器开『AP/桥接模式』: 关闭路由器 DHCP，网线插路由器 LAN 口；"
 echo "     此时由 debian 提供 DHCP，见 router/dnsmasq.conf.example。"
