@@ -1,35 +1,38 @@
 # /etc/esurfing/lite.conf — esurfing_lite.py 配置示例
-# 安装: sudo cp lite/esurfing_lite.py /usr/local/bin/esurfing-lite
-#       sudo cp lite/esurfing-lite.service /etc/systemd/system/
-#       sudo cp lite.conf.example /etc/esurfing/lite.conf  # 并填入账号
+#
+# 安装:
+#   sudo cp lite/esurfing_lite.py /opt/esurfing/esurfing-softrouter/lite/
+#   sudo cp lite/esurfing-lite.service /etc/systemd/system/
+#   sudo cp lite.conf.example /etc/esurfing/lite.conf   # 填好账号后 chmod 600
+#   sudo systemctl daemon-reload && sudo systemctl enable --now esurfing-lite
 
-# 必填
+# ===== 必填: 校园网账号 =====
 user=你的校园网账号
 pass=你的密码
 
-# 检测页（未认证时访问它会跳转到 portal；可从官方 conf/conf.xml 的 redirect 拿到）
-detect_url=http://14.146.227.141:7001/detect.html
+# ===== 学校参数 (CDC 协议) =====
+# 认证 URL (从 index.cgi 配置页的 <auth-url> 获取)
+auth_url=http://14.146.227.141:7001/auth.cgi
 
-# ---- 可选（留空则自动从 portal 页面解析 / 自动探测）----
-# 如果自动获取失败，抓包后手动填：
-#ticket_url=http://x.x.x.x/ticket.cgi
-#auth_url=http://x.x.x.x/auth.cgi
-#keep_url=http://x.x.x.x/keep.cgi
-#term_url=http://x.x.x.x/term.cgi
-#client_ip=10.x.x.x
+# ticket URL 基址 (从 index.cgi 的 <ticket-url> 获取, 通常是不带参数的)
+ticket_base=http://14.146.227.141:7001/ticket.cgi
 
-# 学校标识（官方客户端 HTTP 头里的 CDC-SchoolId / CDC-Domain / CDC-Area，一般可留空）
-#cdc_schoolid=
-#cdc_domain=
-#cdc_area=
+# ticket URL 的查询参数模板。{ip}/{mac} 会替换成本机实际值。
+# 来源: 认证前访问 http://192.168.132.251/ 重定向链里 ticket.cgi 的问号后部分。
+ticket_params=wlanacip=183.3.151.148&wlanuserip={ip}&clientip={ip}&wlanacname=SISE&clientmac={mac}&paip=10.88.88.88&vlan=100.0&iarmdst=192.168.132.251/&portal_node=http://125.88.59.131:10002
 
-# 算法文件位置（官方客户端下载的 zxmAlogic.zxm）
-#zxm_path=/usr/local/ESurfing/bin/zxmAlogic.zxm
+# 学校标识 (发现链第二跳响应头; 直接配置时从这些头抄)
+schoolid=1099
+domain=sise.cn
+area=020
 
-# 客户端指纹
-#ua=CCTP/Linux64/1003
-#ostag=linux64
+# ===== 本机信息 (可选, 留空自动探测) =====
+iface=eno1
+#clientmac=AA:BB:CC:DD:EE:FF   # 一般不用填, 自动读 iface 的 MAC
 
-# 保活/重试
-#interval=60
-#retry_delay=10
+# ===== 可选 =====
+# 发现链入口 (认证前访问它会 302 到 portal 配置页; 不通时用上面的固定参数直连)
+discover_host=http://192.168.132.251/
+hostname=debian
+#interval=60       # 心跳间隔兜底(实际以服务端返回的 <interval> 为准)
+#retry_delay=10    # 拨号失败重试间隔

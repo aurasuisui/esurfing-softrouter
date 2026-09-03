@@ -2,7 +2,7 @@
 
 把 Debian 主机当作"校园网认证网关 + NAT 软路由"，下游接路由器，
 手机/电脑/平板全部走这一条线。基于对官方客户端 linux-client-2.4-64
-（ESurfingSvr）的反汇编分析实现。
+（ESurfingSvr）的反汇编分析 + 对校方 portal 的实测逆向实现。
 
 ## 拓扑
 
@@ -16,30 +16,59 @@
 
     esurfing-softrouter/
     ├── README.md                 本文件
-    ├── install.sh                方案A安装脚本（推荐）
+    ├── install.sh                方案A安装脚本
     ├── apply-patch.sh            给官方守护进程打补丁（禁用共享检测）
-    ├── esurfing.service          systemd 服务单元
+    ├── esurfing.service          方案A 的 systemd 服务单元
     ├── router/
     │   ├── setup-nat.sh          NAT/软路由一键配置
     │   └── dnsmasq.conf.example  路由器开 AP 模式时的 DHCP/DNS（可选）
-    └── lite/                     方案B：干净实现的无头客户端（Beta）
-        ├── esurfing_lite.py
-        ├── esurfing-lite.service
-        ├── lite.conf.example
-        └── README-lite.md
+    └── lite/                     方案B：干净实现的客户端（推荐，已实测）
+        ├── esurfing_lite.py      纯 Python3 标准库，无 GUI
+        ├── esurfing-lite.service systemd 服务单元
+        ├── lite.conf.example     配置示例（含参数获取方法）
+        └── README-lite.md        详细文档
 
 ## 两个方案怎么选
 
-| | 方案A：官方守护进程 + 补丁（推荐） | 方案B：esurfing_lite（Beta） |
+| | 方案B：esurfing_lite（推荐） | 方案A：官方守护进程 + 补丁 |
 |---|---|---|
-| 认证/保活/算法更新 | 原版 ESurfingSvr，学校怎么变都能跟上 | 自行重实现，只覆盖基本流程 |
-| 共享检测 | 已禁用 | 本就没有 |
-| 稳定性 | 高（就是官方拨号程序本身） | 需要按本校 portal 微调 |
-| 部署 | install.sh 一条命令 | 手动两三条命令 |
+| 认证/保活 | 完整重实现 CDC 协议，已在本校 portal 实测全流程（拨号/心跳/下线） | 原版 ESurfingSvr |
+| 共享检测 | 本就没有 | 已禁用（五个补丁） |
+| 无 GUI 稳定性 | 无 GUI 组件，开机自启实测通过 | 无 GUI 时存在自启动问题，需 P4/P5 补丁 |
+| 部署 | 两条命令 | install.sh 一条命令 |
 
-建议：**先用方案A跑通**，之后想折腾再用方案B。
+建议：**优先方案B**（干净、可控、已在真机验证）；方案A作为备选/对比参考。
 
-## 快速开始（方案A）
+## 快速开始（方案B，推荐）
+
+    # 0. 前提：Debian 上已有本仓库 + 校园网线已插好（WAN 口 DHCP）
+    cd esurfing-softrouter
+
+    # 1. 写配置（把学校参数填进 lite.conf.example，见文件内注释）
+    sudo mkdir -p /opt/esurfing/esurfing-softrouter/lite /etc/esurfing
+    sudo cp lite/esurfing_lite.py /opt/esurfing/esurfing-softrouter/lite/
+    sudo cp lite/lite.conf.example /etc/esurfing/lite.conf
+    sudo chmod 600 /etc/esurfing/lite.conf      # 编辑: 填入 user= pass=
+
+    # 2. 安装服务并启动
+    sudo cp lite/esurfing-lite.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now esurfing-lite
+    journalctl -u esurfing-lite -f              # 看日志: 认证成功/心跳保活
+
+    # 3. 配置软路由（自动探测 WAN=默认路由口, LAN=另一个以太网口）
+    sudo ./router/setup-nat.sh
+    # 或显式指定：
+    sudo ./router/setup-nat.sh --wan eno1 --lan enp1s0 --lan-ip 192.168.9.1/24
+
+    # 4. 路由器接法
+    #    路由模式: 路由器 WAN 口插 debian 的 LAN 口，路由器 WAN 设为 DHCP(自动获取)
+    #    AP 模式:  关闭路由器 DHCP，插路由器 LAN 口，debian 上装 dnsmasq 提供 DHCP
+    #              (见 router/dnsmasq.conf.example)
+
+    # 5. 验证: 下游设备应能直接上网，出口 IP 是校园网分配给你的地址
+
+## 快速开始（方案A：官方守护进程 + 补丁）
 
 > 也可以直接克隆整合仓库（官方包 + 本工具一次拿全）:
 >
@@ -73,19 +102,9 @@
     # 2. 看拨号日志（账号无需 @ 后缀，报错码含义见 conf/code.xml）
     journalctl -u esurfing -f
 
-    # 3. 配置软路由（自动探测 WAN=默认路由口, LAN=另一个以太网口）
-    sudo ./router/setup-nat.sh
-    # 或显式指定：
-    sudo ./router/setup-nat.sh --wan enp1s0 --lan enp2s0 --lan-ip 192.168.9.1/24
+    # 3. 之后同方案B第 3-5 步
 
-    # 4. 路由器接法
-    #    路由模式: 路由器 WAN 口插 debian 的 LAN 口，路由器 WAN 设为 DHCP(自动获取)
-    #    AP 模式:  关闭路由器 DHCP，插路由器 LAN 口，debian 上装 dnsmasq 提供 DHCP
-    #              (见 router/dnsmasq.conf.example)
-
-    # 5. 验证: 下游设备应能直接上网，出口 IP 是校园网分配给你的地址
-
-## 补丁做了什么（依据逆向分析）
+## 方案A 的补丁做了什么（依据逆向分析）
 
 官方 ESurfingSvr 里唯一的共享检测入口是
 CWiFiSharedValidate::IsValidEnvironment()，它在登录后按服务器下发的
@@ -99,12 +118,15 @@ againstList 定期执行：
 并在 logout-delay(默认300秒) 后强制下线，GUI 报
 "检测到共享软件冲突/检测到共享冲突"。
 
-apply-patch.sh 一共打三个补丁（其余逻辑一字未动）：
+apply-patch.sh 一共打五个补丁（其余逻辑一字未动）：
 
 1. IsValidEnvironment 入口（偏移 0x223F8）改为 "xor eax,eax; ret"，恒返回"环境正常"；
 2. checkWifi（偏移 0x26B12）改为 "ret"，不再自调度定时任务；
 3. CMsgEngine::GetMessage 的空队列分支（偏移 0x36539）改为 Unlock 后 sleep(1) 再查，
-   修复无 GUI（无界面/服务器）运行时消息线程 100% 占满 CPU 的空转。
+   修复无 GUI（无界面/服务器）运行时消息线程 100% 占满 CPU 的空转；
+4. 拨号链启动条件（偏移 0x424BDF）jne 改 jmp，强制进入拨号流程；
+5. CPortalServer::Start 首启分支（偏移 0x4249F5）改为跳转到 CheckNetStatus，
+   修复无 GUI 下守护进程"只运行不拨号"的问题。
 
 补丁幂等、会先备份 ESurfingSvr.orig 并校验原始字节，可随时恢复：
 
@@ -115,7 +137,7 @@ apply-patch.sh 一共打三个补丁（其余逻辑一字未动）：
 先说结论：在这个 NAT 拓扑下，**不需要对服务端做任何欺骗**，就能让全家设备共享：
 
 1. **本地"共享检测"**：这是官方客户端自己的组件（进程检查 + ip_forward 检查）。
-   方案A把它补掉了，方案B根本没实现。因此你开 NAT、开转发，客户端都不会
+   方案B根本没实现，方案A把它补掉了。因此你开 NAT、开转发，客户端都不会
    再自我了断。
 2. **服务端"终端数超出限制"(错误码 13014000)**：限制的是同一账号**同时在线的
    客户端会话数**。你的拓扑里只有 Debian 上的一个客户端在登录，所以正常
@@ -131,7 +153,10 @@ apply-patch.sh 一共打三个补丁（其余逻辑一字未动）：
 
 ## 常见问题
 
-* 首次拨号失败/算法相关报错：官方守护进程首次联网会从校方服务器下载
+* 方案B 日志出现"标准发现失败，改用配置固定参数"：正常降级行为，说明 portal
+  发现链当前不可达（认证成功后必然如此），用配置里的固定参数直连即可。
+* 方案B 参数怎么拿：见 lite/lite.conf.example 与 lite/README-lite.md。
+* 方案A 首次拨号失败/算法相关报错：官方守护进程首次联网会从校方服务器下载
   zxmAlogic.zxm（编解码算法模块），确认 /usr/local/ESurfing/bin 可写、
   磁盘没满，等 1-2 分钟看日志重试。
 * 需要 root：守护进程要写 /proc、改 DNS、在自身目录写日志/算法文件。

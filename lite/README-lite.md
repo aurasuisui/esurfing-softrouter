@@ -1,46 +1,73 @@
-# esurfing_lite — 干净实现的天翼校园认证客户端（Beta）
+# esurfing_lite — 天翼校园 Linux 无头认证客户端 (v2)
 
-依据对官方 ESurfingSvr 2.4-64 的反汇编分析重写，只做认证/保活/下线，
-**不包含**官方客户端的共享检测组件（CWiFiSharedValidate：ps -C 进程检查 +
-ip_forward 检查），心跳里也永远不发送 <shared>1</shared>。
+纯 Python3 标准库实现的干净客户端，已在本校 portal（cdcportal/1.4.2/gd-portal-12，广东 CDC 协议）上实测通过完整认证流程。
 
-## 与原版协议的对应关系（逆向结论）
+与官方 ESurfingSvr 不同：
 
-| 官方组件                        | 本实现                                |
-|---------------------------------|---------------------------------------|
-| config.campus.js.chinatelecom.com / portal 页面 | detect() + get_config()（解析 ticket-url/auth-url） |
-| zxmAlogic.zxm -> protect.so     | ZsmCodec：解析 zxm 头 -> 逆 XOR -> LZMA1 解压 -> ctypes 调 Code/Prepare/FreeResult |
-| CDC-Checksum                    | MD5(编码串).upper()                    |
-| MakeTicket/Auth/Keep/TermRequestData | 同结构的 XML 模板                      |
-| CWiFiSharedValidate             | **不存在**（这就是"绕过共享检测"的关键） |
+- **不包含任何"共享检测"逻辑**：官方 daemon 会读服务端下发的 againstList 检查本机进程/IP 转发状态并上报，本实现完全不走这套流程；
+- 心跳请求不带共享信息，NAT 软路由场景下对端只看到一台设备（软路由本身）；
+- 无 GUI、无 Qt 依赖，仅用 Python 标准库 + 服务端动态下发的会话算法 .so（自动提取、自动加载）。
 
-## 安装（Debian 13）
+## 工作原理（实测协议）
 
-    sudo cp esurfing_lite.py /usr/local/bin/esurfing-lite
-    sudo chmod 755 /usr/local/bin/esurfing-lite
-    sudo cp esurfing-lite.service /etc/systemd/system/
+    发现         GET 192.168.132.251 -> 302 -> (schoolid/domain/area 响应头)
+                 -> 302 -> index.cgi 页面注释里的 <ticket-url>/<auth-url>
+                 (发现链不通时自动降级为配置文件里的固定参数直连)
+
+    引导         向 ticket.cgi 发任意内容 -> 响应体 = 会话算法文件
+                 (001@<ticket>$<GUID>] + LZMA1 压缩的 .so, 带累加XOR混淆)
+
+    会话算法     解压 .so, ctypes 加载; Code() 编码请求 / DeCode() 解码响应;
+                 Algo-ID 头 = 响应里的 GUID, CDC-Checksum = MD5(编码串) 小写
+
+    认证         ticket 请求 -> <ticket> -> auth 请求(账号/密码/ticket/client-id)
+                 -> 返回 keep-url / term-url / keep-retry
+
+    保活         每 <interval> 秒 POST keep.cgi 心跳
+
+    下线         SIGTERM/SIGINT -> term.cgi -> 退出
+
+## 安装（软路由 Debian 无头）
+
+    # 1. 放到固定位置
+    sudo mkdir -p /opt/esurfing/esurfing-softrouter/lite
+    sudo cp esurfing_lite.py /opt/esurfing/esurfing-softrouter/lite/
+    sudo chmod +x /opt/esurfing/esurfing-softrouter/lite/esurfing_lite.py
+
+    # 2. 配置 (必改: user/pass; 其余学校参数见 lite.conf.example 注释)
+    sudo mkdir -p /etc/esurfing
     sudo cp lite.conf.example /etc/esurfing/lite.conf
-    sudo nano /etc/esurfing/lite.conf        # 填 user/pass，按需改 detect_url
+    sudo chmod 600 /etc/esurfing/lite.conf
+
+    # 3. systemd 服务 (与官方 esurfing.service 二选一, 不要同时启用)
+    sudo cp esurfing-lite.service /etc/systemd/system/
     sudo systemctl daemon-reload
+    sudo systemctl disable --now esurfing.service   # 停用官方 daemon
     sudo systemctl enable --now esurfing-lite
+
+    # 4. 查看状态
     journalctl -u esurfing-lite -f
 
-## 前提：算法文件 zxmAlogic.zxm
+## 手动运行
 
-官方 2.4-64 的编解码算法是一个**服务端下发的动态库**（LZMA 压缩、带 3 段头）。
-本程序不内置算法，而是复用官方客户端下载的 /usr/local/ESurfing/bin/zxmAlogic.zxm
-（先用本包 install.sh 装一次官方守护进程并成功拨号一次即可得到该文件）。
+    sudo python3 esurfing_lite.py --once            # 拨号一次, 适合调试
+    sudo python3 esurfing_lite.py --debug           # 前台运行, 打印全部协议细节
+    sudo python3 esurfing_lite.py --force           # 跳过在线检查强制重新拨号
 
-## 测试
+状态目录：/var/lib/esurfing-lite/（client-id、protect.so 缓存）。
 
-    # 前台单次拨号（详细日志）
-    sudo python3 esurfing_lite.py --config /etc/esurfing/lite.conf --once --debug
+## 参数获取方法（换学校/换城市时）
 
-## 已知风险 / 局限性（重要）
+1. 认证前在软路由上执行：
+   curl -A "CCTP/Linux64/1003" -D - -o /dev/null http://<detect_host>/
+   跟着 302 跳 3 次，记录第二跳响应头里的 schoolid/domain/area 和最终 index.cgi 页面注释里的
+   <ticket-url>/<auth-url>。
+2. 把 ticket-url 问号后的参数抄进 ticket_params（IP/MAC 用 {ip}/{mac} 占位）。
+3. 若 detect_host 未知，查 DHCP 客户端或抓包看未认证 HTTP 请求被劫持到哪里。
 
-1. 各校 portal 细节可能不同（有的学校从 config 服务器下发配置、有的在重定向页里）。
-   如果自动获取 ticket-url/auth-url 失败，请按 lite.conf.example 手动指定，
-   值可以从官方客户端抓包（tcpdump 看 /ticket.cgi、/auth.cgi 的 Host）得到。
-2. Prepare 的第一个参数沿用了官方的传法（zxm 头部的 3 字节 magic 指针）；
-   若个别算法版本不接受，请反馈日志。
-3. 这是 Beta：请先 --once --debug 验证能认证成功，再切换为系统服务。
+## 说明与风险提示
+
+- 本客户端仅做本机认证，不改动服务端任何规则。NAT 软路由拓扑下，服务端看到的是软路由这一台设备；
+  多设备共享属于校园网服务条款范畴，请自行遵守学校规定。
+- 会话算法 .so 由 portal 每次下发，本程序自动提取到 /var/lib/esurfing-lite/protect.so，不参与网络之外的任何分发。
+- 学校升级 portal 后若协议变化，用 --debug 抓取交互细节，比对本文档的协议描述即可定位。

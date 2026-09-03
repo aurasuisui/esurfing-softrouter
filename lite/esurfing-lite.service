@@ -6,7 +6,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/esurfing-lite --config /etc/esurfing/lite.conf
+ExecStart=/usr/bin/python3 /opt/esurfing/esurfing-softrouter/lite/esurfing_lite.py --config /etc/esurfing/lite.conf
 Restart=always
 RestartSec=10
 User=root
