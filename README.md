@@ -15,7 +15,8 @@
 ## 目录结构
 
     esurfing-softrouter/
-    ├── README.md                 本文件
+    ├── README.md                 本文件（部署指南）
+    ├── REPORT.md                 技术报告：逆向分析/协议实测/问题与应对
     ├── install.sh                方案A安装脚本
     ├── apply-patch.sh            给官方守护进程打补丁（禁用共享检测）
     ├── esurfing.service          方案A 的 systemd 服务单元
@@ -39,36 +40,102 @@
 
 建议：**优先方案B**（干净、可控、已在真机验证）；方案A作为备选/对比参考。
 
-## 快速开始（方案B，推荐）
+## 快速开始（方案B，推荐）—— 手把手部署
 
-    # 0. 前提：Debian 上已有本仓库 + 校园网线已插好（WAN 口 DHCP）
+### 第 0 步：确认硬件与接口（5 分钟）
+
+校园网网线已插好、机器能通过 DHCP 拿到校园网地址的前提下，先弄清两个网口：
+
+    ip -br link show
+    ip -4 addr show | grep inet        # 找到校园网口(有 10.x/172.x/其他校园网段 IP 的)
+    ip route show default              # 默认路由出口 = 校园网口(WAN)
+
+假设结果：WAN 口 = eno1（校园网），LAN 口 = enp1s0（接路由器，此时无 IP 属正常）。
+下文均按此举例，实际以你自己的网口名为准。
+
+### 第 1 步：放置文件
+
     cd esurfing-softrouter
-
-    # 1. 写配置（把学校参数填进 lite.conf.example，见文件内注释）
     sudo mkdir -p /opt/esurfing/esurfing-softrouter/lite /etc/esurfing
     sudo cp lite/esurfing_lite.py /opt/esurfing/esurfing-softrouter/lite/
     sudo cp lite/lite.conf.example /etc/esurfing/lite.conf
-    sudo chmod 600 /etc/esurfing/lite.conf      # 编辑: 填入 user= pass=
 
-    # 2. 安装服务并启动
+### 第 2 步：填配置（核心）
+
+    sudo nano /etc/esurfing/lite.conf
+    sudo chmod 600 /etc/esurfing/lite.conf
+
+必填：user= / pass= 校园网账号密码。
+学校参数（auth_url / ticket_base / ticket_params / schoolid / domain / area）获取方法
+见 lite/lite.conf.example 文件内注释和 lite/README-lite.md 的"参数获取方法"一节。
+
+### 第 3 步：安装并启动认证服务
+
     sudo cp lite/esurfing-lite.service /etc/systemd/system/
     sudo systemctl daemon-reload
     sudo systemctl enable --now esurfing-lite
-    journalctl -u esurfing-lite -f              # 看日志: 认证成功/心跳保活
 
-    # 3. 配置软路由（自动探测 WAN=默认路由口, LAN=另一个以太网口）
-    #    推荐带 --lan-ip: 自动配好 LAN 静态地址 + dnsmasq DHCP,
-    #    下游路由器重置后插 WAN 口即可自动拿到地址
-    sudo ./router/setup-nat.sh --lan-ip 192.168.9.1/24
-    # 或显式指定：
+30 秒内看到"认证成功"即为拨号成功：
+
+    journalctl -u esurfing-lite -f
+    # 预期依次出现:
+    #   发现完成 / 标准发现失败(降级属正常) → 引导请求 → 会话算法已加载
+    #   → ticket=... → 认证成功: keep-url=... → 拨号成功，开始心跳保活
+
+验证本机已上网：
+
+    curl -4 -o /dev/null -w '%{http_code}\n' http://www.baidu.com/   # 预期 200
+
+### 第 4 步：配置软路由（NAT + DHCP 一键）
+
     sudo ./router/setup-nat.sh --wan eno1 --lan enp1s0 --lan-ip 192.168.9.1/24
 
-    # 4. 路由器接法
-    #    路由模式: 路由器 WAN 口插 debian 的 LAN 口，路由器 WAN 设为 DHCP(自动获取)
-    #    AP 模式:  关闭路由器 DHCP，插路由器 LAN 口，debian 上装 dnsmasq 提供 DHCP
-    #              (见 router/dnsmasq.conf.example)
+脚本自动完成并**开机自恢复**：ip_forward、nftables MASQUERADE、
+LAN 口静态地址(NetworkManager/ifupdown 自适应)、dnsmasq DHCP。
+重跑幂等，可放心执行。预期输出末尾出现：
 
-    # 5. 验证: 下游设备应能直接上网，出口 IP 是校园网分配给你的地址
+    NAT 配置完成。WAN 口: eno1 ... LAN 地址: 192.168.9.1/24 (已配 DHCP: 192.168.9.100-192.168.9.200)
+
+### 第 5 步：接路由器
+
+- **路由模式（推荐，最简单）**：网线从 debian 的 LAN 口接路由器 **WAN 口**，
+  路由器保持出厂默认（WAN 自动获取 DHCP）。插上后路由器自动拿到 192.168.9.x 地址，
+  确认方法：在 debian 上执行
+
+        sudo cat /var/lib/misc/dnsmasq.leases     # 出现路由器主机名即成功
+
+- AP/桥接模式：见 router/dnsmasq.conf.example（需要时再折腾）。
+
+### 第 6 步：验收清单
+
+    # ① 三个服务全部 active
+    systemctl is-active esurfing-lite dnsmasq nftables
+
+    # ② 模拟下游设备（可选，用 netns 验证 NAT 转发链路）
+    sudo ip netns add t && sudo ip link add v0 type veth peer name v1
+    sudo ip link set v1 netns t && sudo ip addr add 10.99.0.1/24 dev v0 && sudo ip link set v0 up
+    sudo ip netns exec t sh -c 'ip addr add 10.99.0.2/24 dev v1; ip link set v1 up; ip route add default via 10.99.0.1; curl -4 -o /dev/null -w "%{http_code}\n" http://www.baidu.com/'
+    sudo ip netns del t; sudo ip link del v0
+    # 预期输出 200 = 转发链路正常
+
+    # ③ 手机/电脑连路由器 WiFi 实测上网
+
+### 第 7 步：重启验证（可选但强烈建议）
+
+    sudo reboot
+
+重启后无需任何人工干预，esurfing-lite 会自动重新拨号（实测 5 秒内完成认证），
+NAT/DHCP 由 systemd 自恢复。这是"软路由无人值守"的最终验收。
+
+## 常见问题排查（简表）
+
+| 现象 | 排查 |
+|---|---|
+| 日志停在"引导请求"之后报错 | 学校 portal 协议变化，用 --debug 抓细节，对照 REPORT.md 协议章节 |
+| 出现"标准发现失败，改用配置固定参数" | 正常降级（认证成功后 portal 发现地址必超时），能拨上号即可 |
+| 手机网速异常低 | 先关代理软件再测；确认连的是 5GHz；有线链路问题见 REPORT.md 实测章节 |
+| 重启后不能上网 | journalctl -u esurfing-lite 看拨号日志；ip route 看默认路由是否在校园网口 |
+| 路由器 WAN 拿不到地址 | 确认 debian 侧插 LAN 口、路由器侧插 WAN 口；dnsmasq.leases 无记录则换网线 |
 
 ## 快速开始（方案A：官方守护进程 + 补丁）
 
